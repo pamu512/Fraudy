@@ -1,0 +1,360 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=Edge" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Fraud Analyzer</title>
+    <script src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js"></script>
+    <style>
+      :root {
+        color-scheme: light;
+        font-family: "Segoe UI", system-ui, sans-serif;
+        line-height: 1.5;
+        --accent: #0078d4;
+        --accent-hover: #106ebe;
+        --surface: #ffffff;
+        --border: #d1d1d1;
+        --text: #242424;
+        --muted: #616161;
+        --danger: #b00020;
+        --danger-bg: #fce8e6;
+        --success: #107c10;
+        --success-bg: #e6f4ea;
+        --warn-bg: #fff4ce;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        padding: 16px;
+        background: #f5f5f5;
+        color: var(--text);
+      }
+
+      header {
+        margin-bottom: 20px;
+      }
+
+      h1 {
+        font-size: 1.25rem;
+        font-weight: 600;
+        margin: 0 0 4px;
+      }
+
+      .subtitle {
+        margin: 0;
+        color: var(--muted);
+        font-size: 0.875rem;
+      }
+
+      section {
+        margin-bottom: 16px;
+      }
+
+      fieldset {
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 12px 14px;
+        margin: 0 0 16px;
+        background: var(--surface);
+      }
+
+      legend {
+        font-weight: 600;
+        padding: 0 6px;
+      }
+
+      label {
+        display: block;
+        margin-bottom: 6px;
+        font-size: 0.8125rem;
+        font-weight: 600;
+      }
+
+      input[type="url"],
+      input[type="password"],
+      select {
+        width: 100%;
+        padding: 8px 10px;
+        border: 1px solid var(--border);
+        border-radius: 4px;
+        font-size: 0.875rem;
+        background: #fff;
+      }
+
+      .radio-group {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        margin-top: 4px;
+      }
+
+      .radio-option {
+        display: flex;
+        align-items: flex-start;
+        gap: 8px;
+        font-size: 0.875rem;
+        font-weight: 400;
+        cursor: pointer;
+      }
+
+      .radio-option input {
+        margin-top: 3px;
+      }
+
+      .radio-option span {
+        display: block;
+        color: var(--muted);
+        font-size: 0.8125rem;
+        font-weight: 400;
+      }
+
+      .selection-card {
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 12px 14px;
+      }
+
+      .selection-card dl {
+        margin: 0;
+        display: grid;
+        grid-template-columns: auto 1fr;
+        gap: 4px 12px;
+        font-size: 0.8125rem;
+      }
+
+      dt {
+        color: var(--muted);
+        font-weight: 600;
+      }
+
+      dd {
+        margin: 0;
+        word-break: break-all;
+      }
+
+      .actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-bottom: 16px;
+      }
+
+      button {
+        padding: 8px 16px;
+        border: 1px solid transparent;
+        border-radius: 4px;
+        cursor: pointer;
+        font-size: 0.875rem;
+        font-weight: 600;
+      }
+
+      button:disabled {
+        opacity: 0.55;
+        cursor: not-allowed;
+      }
+
+      .btn-primary {
+        background: var(--accent);
+        color: #fff;
+      }
+
+      .btn-primary:hover:not(:disabled) {
+        background: var(--accent-hover);
+      }
+
+      .btn-secondary {
+        background: #fff;
+        border-color: var(--border);
+        color: var(--text);
+      }
+
+      #status {
+        min-height: 1.25rem;
+        margin: 0 0 12px;
+        font-size: 0.875rem;
+      }
+
+      #status.error {
+        color: var(--danger);
+      }
+
+      #status.success {
+        color: var(--success);
+      }
+
+      .panel {
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 12px 14px;
+        margin-bottom: 16px;
+      }
+
+      .panel.hidden {
+        display: none;
+      }
+
+      .panel h2 {
+        margin: 0 0 10px;
+        font-size: 0.9375rem;
+      }
+
+      .summary-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 8px;
+        font-size: 0.8125rem;
+      }
+
+      .summary-item strong {
+        display: block;
+        color: var(--muted);
+        font-size: 0.75rem;
+        text-transform: uppercase;
+        letter-spacing: 0.02em;
+      }
+
+      .badge {
+        display: inline-block;
+        padding: 2px 8px;
+        border-radius: 999px;
+        font-size: 0.75rem;
+        font-weight: 600;
+      }
+
+      .badge.pass {
+        background: var(--success-bg);
+        color: var(--success);
+      }
+
+      .badge.fail {
+        background: var(--danger-bg);
+        color: var(--danger);
+      }
+
+      .anomaly-list {
+        list-style: none;
+        margin: 0;
+        padding: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+      }
+
+      .anomaly-item {
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        padding: 10px;
+        background: var(--warn-bg);
+        font-size: 0.8125rem;
+      }
+
+      .anomaly-item header {
+        display: flex;
+        justify-content: space-between;
+        gap: 8px;
+        margin-bottom: 4px;
+      }
+
+      .anomaly-item p {
+        margin: 0;
+        color: var(--text);
+      }
+
+      .empty-state {
+        color: var(--muted);
+        font-size: 0.8125rem;
+        margin: 0;
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>Fraud Analyzer</h1>
+      <p class="subtitle">Scan the active selection and write high-risk rows back to Excel.</p>
+    </header>
+
+    <main>
+      <fieldset>
+        <legend>Connection</legend>
+        <label for="backend-url">API base URL</label>
+        <input
+          id="backend-url"
+          type="url"
+          value="http://localhost:8000"
+          autocomplete="off"
+          spellcheck="false"
+        />
+        <label for="api-token">API token</label>
+        <input
+          id="api-token"
+          type="password"
+          value="super-secret-local-token"
+          autocomplete="off"
+          spellcheck="false"
+        />
+      </fieldset>
+
+      <fieldset>
+        <legend>Write-back</legend>
+        <div class="radio-group" role="radiogroup" aria-label="Write-back mode">
+          <label class="radio-option">
+            <input type="radio" name="writeback-mode" value="highlight" checked />
+            <div>
+              Highlight high-risk rows
+              <span>Apply a fill color to flagged rows on the source sheet.</span>
+            </div>
+          </label>
+          <label class="radio-option">
+            <input type="radio" name="writeback-mode" value="sheet" />
+            <div>
+              Create results sheet
+              <span>Write a new sheet with risk scores and reasons appended.</span>
+            </div>
+          </label>
+        </div>
+      </fieldset>
+
+      <section class="selection-card" aria-labelledby="selection-heading">
+        <h2 id="selection-heading" class="visually-hidden">Selection</h2>
+        <dl>
+          <dt>Range</dt>
+          <dd id="selection-range">—</dd>
+          <dt>Sheet</dt>
+          <dd id="selection-sheet">—</dd>
+          <dt>Shape</dt>
+          <dd id="selection-shape">—</dd>
+          <dt>Headers</dt>
+          <dd id="selection-headers">—</dd>
+        </dl>
+      </section>
+
+      <p id="status" role="status" aria-live="polite"></p>
+
+      <div class="actions">
+        <button id="refresh-selection-btn" type="button" class="btn-secondary">
+          Refresh Selection
+        </button>
+        <button id="analyze-btn" type="button" class="btn-primary" disabled>
+          Analyze &amp; Write Results
+        </button>
+      </div>
+
+      <section id="summary-panel" class="panel hidden" aria-labelledby="summary-heading">
+        <h2 id="summary-heading">Analysis Summary</h2>
+        <div id="summary-content" class="summary-grid"></div>
+      </section>
+
+      <section id="anomaly-panel" class="panel hidden" aria-labelledby="anomaly-heading">
+        <h2 id="anomaly-heading">High-Risk Rows</h2>
+        <ul id="anomaly-list" class="anomaly-list"></ul>
+      </section>
+    </main>
+  </body>
+</html>
