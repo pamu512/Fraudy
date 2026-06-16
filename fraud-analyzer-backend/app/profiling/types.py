@@ -12,6 +12,7 @@ class LogicalType(StrEnum):
     DATETIME = "datetime"
     STRING = "string"
     CATEGORICAL = "categorical"
+    METADATA_ID = "metadata_id"
     UNKNOWN = "unknown"
 
 

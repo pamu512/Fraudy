@@ -3,11 +3,22 @@
 type CellPrimitive = string | number | boolean | null;
 type WritebackMode = "highlight" | "sheet";
 
+interface ColumnProfile {
+  name: string;
+  logical_type: string;
+}
+
 interface SessionUploadResponse {
   session_id: string;
   total_rows: number;
-  numeric_columns: string[];
-  expires_at: number;
+  profile: {
+    columns: ColumnProfile[];
+  };
+}
+
+interface SessionAnalyzeResponse {
+  session_id: string;
+  message: string;
 }
 
 interface RuleHit {
@@ -69,14 +80,20 @@ const selectionRangeEl = document.getElementById("selection-range") as HTMLEleme
 const selectionSheetEl = document.getElementById("selection-sheet") as HTMLElement | null;
 const selectionShapeEl = document.getElementById("selection-shape") as HTMLElement | null;
 const selectionHeadersEl = document.getElementById("selection-headers") as HTMLElement | null;
+const profileBtn = document.getElementById("profile-btn") as HTMLButtonElement | null;
 const analyzeBtn = document.getElementById("analyze-btn") as HTMLButtonElement | null;
 const refreshBtn = document.getElementById("refresh-selection-btn") as HTMLButtonElement | null;
+const profilePanel = document.getElementById("profile-panel") as HTMLElement | null;
+const profileList = document.getElementById("profile-list") as HTMLUListElement | null;
 const summaryPanel = document.getElementById("summary-panel") as HTMLElement | null;
 const summaryContent = document.getElementById("summary-content") as HTMLElement | null;
 const anomalyPanel = document.getElementById("anomaly-panel") as HTMLElement | null;
 const anomalyList = document.getElementById("anomaly-list") as HTMLUListElement | null;
 
 let currentSelection: SelectionSnapshot | null = null;
+let currentSessionId: string | null = null;
+let currentTotalRows: number = 0;
+let currentIncludedColumns: string[] = [];
 
 function setStatus(message: string, tone: "default" | "error" | "success" = "default"): void {
   if (!statusEl) {
@@ -244,7 +261,7 @@ async function readActiveSelection(): Promise<SelectionSnapshot> {
 }
 
 function updateSelectionUi(snapshot: SelectionSnapshot | null): void {
-  if (!analyzeBtn) {
+  if (!profileBtn) {
     return;
   }
 
@@ -253,7 +270,7 @@ function updateSelectionUi(snapshot: SelectionSnapshot | null): void {
     if (selectionSheetEl) selectionSheetEl.textContent = "-";
     if (selectionShapeEl) selectionShapeEl.textContent = "-";
     if (selectionHeadersEl) selectionHeadersEl.textContent = "-";
-    analyzeBtn.disabled = true;
+    profileBtn.disabled = true;
     return;
   }
 
@@ -265,7 +282,7 @@ function updateSelectionUi(snapshot: SelectionSnapshot | null): void {
   if (selectionHeadersEl) {
     selectionHeadersEl.textContent = snapshot.headers.join(", ");
   }
-  analyzeBtn.disabled = false;
+  profileBtn.disabled = false;
 }
 
 async function refreshSelection(): Promise<void> {
@@ -401,6 +418,72 @@ function resultsToHighRiskRows(results: SessionRowResult[]): RiskScoreRow[] {
     .sort((a, b) => b.score - a.score);
 }
 
+async function analyzeSession(sessionId: string, includedColumns: string[]): Promise<SessionAnalyzeResponse> {
+  const response = await fetch(`${getApiBaseUrl()}/session/${encodeURIComponent(sessionId)}/analyze`, {
+    method: "POST",
+    headers: {
+      "X-Fraudy-Token": getApiToken(),
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ included_columns: includedColumns }),
+  });
+  return parseJsonResponse<SessionAnalyzeResponse>(response, "Session analysis failed");
+}
+
+function renderProfileChecklist(upload: SessionUploadResponse): void {
+  if (!profileList || !profilePanel) return;
+  profileList.innerHTML = "";
+  currentIncludedColumns = [];
+  
+  upload.profile.columns.forEach((col) => {
+    const item = document.createElement("li");
+    item.className = "anomaly-item";
+    
+    let isIncluded = false;
+    let typeDisplay = "Unknown";
+    
+    switch (col.logical_type) {
+      case "metadata_id":
+        typeDisplay = "Row IDs (Excluded from ML)";
+        break;
+      case "categorical":
+        typeDisplay = "Categories (Included for Grouping)";
+        break;
+      case "integer":
+      case "float":
+        typeDisplay = "Numeric Amount (Included)";
+        isIncluded = true;
+        break;
+      case "datetime":
+        typeDisplay = "Date/Time (Excluded from ML)";
+        break;
+      default:
+        typeDisplay = `${col.logical_type} (Excluded)`;
+    }
+    
+    if (isIncluded) {
+      currentIncludedColumns.push(col.name);
+    }
+
+    const header = document.createElement("header");
+    header.innerHTML = `
+      <strong>${col.name}</strong>
+      <span class="badge ${isIncluded ? 'pass' : 'fail'}">${isIncluded ? 'Included' : 'Excluded'}</span>
+    `;
+
+    const reason = document.createElement("p");
+    reason.textContent = `Detected as: ${typeDisplay}`;
+
+    item.appendChild(header);
+    item.appendChild(reason);
+    profileList.appendChild(item);
+  });
+  
+  profilePanel.classList.remove("hidden");
+  if (summaryPanel) summaryPanel.classList.add("hidden");
+  if (anomalyPanel) anomalyPanel.classList.add("hidden");
+}
+
 function renderSummary(upload: SessionUploadResponse, highRiskCount: number): void {
   if (!summaryPanel || !summaryContent) {
     return;
@@ -416,8 +499,8 @@ function renderSummary(upload: SessionUploadResponse, highRiskCount: number): vo
       ${upload.total_rows}
     </div>
     <div class="summary-item">
-      <strong>Numeric Columns</strong>
-      ${upload.numeric_columns.length}
+      <strong>Analyzed Columns</strong>
+      ${currentIncludedColumns.length}
     </div>
     <div class="summary-item">
       <strong>High-Risk Rows</strong>
@@ -608,25 +691,53 @@ async function writeSessionResultsToWorkbook(
   return highRiskRows;
 }
 
-async function analyzeAndWriteBack(): Promise<void> {
+async function profileSelection(): Promise<void> {
   if (!currentSelection) {
     setStatus("Select a range in the workbook first.", "error");
     return;
   }
 
-  if (analyzeBtn) {
-    analyzeBtn.disabled = true;
-  }
-  if (refreshBtn) {
-    refreshBtn.disabled = true;
-  }
+  if (profileBtn) profileBtn.disabled = true;
+  if (refreshBtn) refreshBtn.disabled = true;
+  if (analyzeBtn) analyzeBtn.disabled = true;
 
   try {
-    setStatus("Uploading selection as CSV for global session analysis...");
+    setStatus("Profiling selection data...");
     const upload = await uploadSession(currentSelection);
+    currentSessionId = upload.session_id;
+    currentTotalRows = upload.total_rows;
+    renderProfileChecklist(upload);
+    setStatus("Profile ready. Review the checklist and run full analysis.", "success");
+  } catch (error) {
+    if (error instanceof TypeError) {
+      setStatus("Network error. Check the backend URL, token, and CORS settings.", "error");
+    } else {
+      const message = error instanceof Error ? error.message : "Profiling failed.";
+      setStatus(message, "error");
+    }
+  } finally {
+    if (refreshBtn) refreshBtn.disabled = false;
+    if (profileBtn) profileBtn.disabled = currentSelection === null;
+    if (analyzeBtn && currentSessionId) analyzeBtn.disabled = false;
+  }
+}
+
+async function analyzeAndWriteBack(): Promise<void> {
+  if (!currentSelection || !currentSessionId) {
+    setStatus("Profile the data first.", "error");
+    return;
+  }
+
+  if (analyzeBtn) analyzeBtn.disabled = true;
+  if (profileBtn) profileBtn.disabled = true;
+  if (refreshBtn) refreshBtn.disabled = true;
+
+  try {
+    setStatus("Running anomaly detection engines...");
+    await analyzeSession(currentSessionId, currentIncludedColumns);
 
     setStatus("Fetching session risk results...");
-    const results = await fetchSessionResults(upload.session_id, upload.total_rows);
+    const results = await fetchSessionResults(currentSessionId, currentTotalRows);
 
     setStatus("Writing risk scores to workbook...");
     const highRiskRows = await writeSessionResultsToWorkbook(
@@ -635,8 +746,12 @@ async function analyzeAndWriteBack(): Promise<void> {
       getWritebackMode(),
     );
 
-    renderSummary(upload, highRiskRows.length);
+    // Re-render summary with current upload data mock
+    renderSummary({ session_id: currentSessionId, total_rows: currentTotalRows, profile: { columns: [] } }, highRiskRows.length);
     renderHighRiskRows(highRiskRows);
+    
+    if (profilePanel) profilePanel.classList.add("hidden");
+    
     setStatus(
       `Analysis complete. Wrote ${results.length} score(s), ${highRiskRows.length} high-risk row(s).`,
       "success",
@@ -649,12 +764,9 @@ async function analyzeAndWriteBack(): Promise<void> {
       setStatus(message, "error");
     }
   } finally {
-    if (refreshBtn) {
-      refreshBtn.disabled = false;
-    }
-    if (analyzeBtn) {
-      analyzeBtn.disabled = currentSelection === null;
-    }
+    if (refreshBtn) refreshBtn.disabled = false;
+    if (profileBtn) profileBtn.disabled = currentSelection === null;
+    if (analyzeBtn) analyzeBtn.disabled = false;
   }
 }
 
@@ -665,6 +777,10 @@ function roundScore(score: number): number {
 function bindEvents(): void {
   refreshBtn?.addEventListener("click", () => {
     void refreshSelection();
+  });
+
+  profileBtn?.addEventListener("click", () => {
+    void profileSelection();
   });
 
   analyzeBtn?.addEventListener("click", () => {

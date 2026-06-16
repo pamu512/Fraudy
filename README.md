@@ -170,7 +170,7 @@ For larger datasets, use the stateful session flow instead of chunked JSON. The 
 
 These endpoints require the `X-Fraudy-Token` header. The expected token comes from `FRAUDY_API_KEY`; if unset, the local development default is `super-secret-local-token`.
 
-**`POST /session/upload`** — upload a CSV and compute global scores
+**`POST /session/upload`** — upload a CSV, compile global statistical profiles, and return the inferred schema.
 
 ```bash
 curl -s -X POST http://127.0.0.1:8000/session/upload \
@@ -183,8 +183,23 @@ Example response:
 ```json
 {
   "session_id": "7f5f5e7d-9e24-4df6-8f83-75a62dcd43e4",
-  "total_rows": 50000
+  "total_rows": 50000,
+  "profile": {
+    "columns": [
+      { "name": "Tx_ID", "logical_type": "metadata_id" },
+      { "name": "Amount", "logical_type": "float" }
+    ]
+  }
 }
+```
+
+**`POST /session/{session_id}/analyze`** — run engines on verified columns
+
+```bash
+curl -s -X POST "http://127.0.0.1:8000/session/7f5f5e7d-9e24-4df6-8f83-75a62dcd43e4/analyze" \
+  -H "X-Fraudy-Token: super-secret-local-token" \
+  -H "Content-Type: application/json" \
+  -d '{"included_columns": ["Amount"]}'
 ```
 
 **`GET /session/{session_id}/results`** — page through score results
@@ -226,8 +241,10 @@ Yes, the same FastAPI backend works with Google Sheets through the standalone Ap
 3. Empty columns are stripped out before sending data.
 4. The sheet data is serialized once into CSV.
 5. The script uploads that CSV to `/session/upload` with `UrlFetchApp.fetch()`.
-6. The script pages `/session/{session_id}/results` for precomputed global scores.
-7. Returned scores and reasons are appended as new **Risk Score** and **Reason** columns.
+6. Fraudy responds with the detected schema. A confirmation dialog lets the analyst proceed.
+7. The script asks Fraudy to `/session/{session_id}/analyze` the confirmed columns.
+8. The script pages `/session/{session_id}/results` for precomputed global scores.
+9. Returned scores and reasons are appended as new **Risk Score** and **Reason** columns.
 
 The upload uses multipart form data, not chunked JSON:
 

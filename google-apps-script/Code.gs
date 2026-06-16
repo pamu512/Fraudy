@@ -90,7 +90,7 @@ function runFraudAnalysis() {
     }
 
     spreadsheet.toast(
-      `Uploading ${stripped.dataRowCount} row(s) for global analysis...`,
+      `Profiling ${stripped.dataRowCount} row(s)...`,
       'Fraud Session',
       -1,
     );
@@ -98,12 +98,51 @@ function runFraudAnalysis() {
     const csv = buildCsv_(stripped.headers, stripped.hasHeaderRow ? stripped.values.slice(1) : stripped.values);
     const upload = uploadSession_(csv, `${safeFilename_(sheet.getName())}.csv`);
 
+    const includedColumns = [];
+    let summaryText = `Fraudy profiled ${upload.total_rows} rows.\n\nDetected Schema:\n`;
+    
+    upload.profile.columns.forEach(col => {
+        let isIncluded = false;
+        let typeDisplay = "Unknown";
+        
+        switch (col.logical_type) {
+          case "metadata_id":
+            typeDisplay = "Row IDs (Excluded)";
+            break;
+          case "categorical":
+            typeDisplay = "Categories (Excluded)";
+            break;
+          case "integer":
+          case "float":
+            typeDisplay = "Numeric (Included)";
+            isIncluded = true;
+            break;
+          case "datetime":
+            typeDisplay = "Date/Time (Excluded)";
+            break;
+          default:
+            typeDisplay = `${col.logical_type} (Excluded)`;
+        }
+        
+        if (isIncluded) includedColumns.push(col.name);
+        summaryText += `- ${col.name}: ${typeDisplay}\n`;
+    });
+    
+    summaryText += `\nProceed with anomaly detection on ${includedColumns.length} columns?`;
+    
+    const response = ui.alert('Pre-Flight Checklist', summaryText, ui.ButtonSet.YES_NO);
+    if (response !== ui.Button.YES) {
+       ui.alert('Analysis Cancelled', 'You can modify the data and try again.', ui.ButtonSet.OK);
+       return;
+    }
+
     spreadsheet.toast(
-      `Session ${upload.session_id} created. Downloading scores...`,
+      `Analyzing Session ${upload.session_id.slice(0, 8)}. Downloading scores...`,
       'Fraud Session',
       -1,
     );
 
+    analyzeSession_(upload.session_id, includedColumns);
     const results = fetchAllSessionResults_(upload.session_id, upload.total_rows);
     writeRiskScores_(sheet, matrix, results);
 
@@ -177,7 +216,7 @@ function stripEmptyColumns_(values) {
 /**
  * @param {string} csv
  * @param {string} filename
- * @return {{session_id: string, total_rows: number, numeric_columns: Array<string>, expires_at: number}}
+ * @return {{session_id: string, total_rows: number, profile: Object}}
  */
 function uploadSession_(csv, filename) {
   const blob = Utilities.newBlob(csv, 'text/csv', filename);
@@ -189,6 +228,21 @@ function uploadSession_(csv, filename) {
   });
 
   return parseJsonResponse_(response, 'Session upload failed');
+}
+
+/**
+ * @param {string} sessionId
+ * @param {Array<string>} includedColumns
+ */
+function analyzeSession_(sessionId, includedColumns) {
+  const response = UrlFetchApp.fetch(`${getFraudApiBaseUrl_()}/session/${encodeURIComponent(sessionId)}/analyze`, {
+    method: 'post',
+    headers: Object.assign({}, buildAuthHeaders_(), { 'Content-Type': 'application/json' }),
+    payload: JSON.stringify({ included_columns: includedColumns }),
+    muteHttpExceptions: true,
+  });
+
+  return parseJsonResponse_(response, 'Session analysis failed');
 }
 
 /**

@@ -341,10 +341,19 @@
         <button id="refresh-selection-btn" type="button" class="btn-secondary">
           Refresh Selection
         </button>
-        <button id="analyze-btn" type="button" class="btn-primary" disabled>
-          Analyze &amp; Write Results
+        <button id="profile-btn" type="button" class="btn-primary" disabled>
+          Profile Data
         </button>
       </div>
+
+      <section id="profile-panel" class="panel hidden" aria-labelledby="profile-heading">
+        <h2 id="profile-heading">Pre-Flight Checklist</h2>
+        <p class="subtitle" style="margin-bottom: 8px;">Review the detected schema before running anomaly detection.</p>
+        <ul id="profile-list" class="anomaly-list" style="margin-bottom: 12px;"></ul>
+        <button id="analyze-btn" type="button" class="btn-primary" style="width: 100%;">
+          Run Full Analysis
+        </button>
+      </section>
 
       <section id="summary-panel" class="panel hidden" aria-labelledby="summary-heading">
         <h2 id="summary-heading">Analysis Summary</h2>

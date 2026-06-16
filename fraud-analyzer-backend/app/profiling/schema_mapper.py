@@ -130,10 +130,28 @@ def infer_logical_type(series: pd.Series) -> tuple[LogicalType, pd.Series]:
     is_numeric, numeric_series = _infer_numeric(series)
     if is_numeric and numeric_series is not None:
         non_null = numeric_series.dropna()
+        is_integer = False
         if not non_null.empty and (non_null % 1 == 0).all():
+            is_integer = True
+        elif pd.api.types.is_integer_dtype(non_null):
+            is_integer = True
+
+        if is_integer:
+            unique_count = non_null.nunique()
+            total_count = len(non_null)
+            
+            if total_count > 0:
+                # Mathematical Heuristics for Metadata IDs
+                if unique_count == total_count:
+                    # Check for perfect sequentiality or just high cardinality unique integers
+                    return LogicalType.METADATA_ID, numeric_series
+                
+                # Low-Cardinality Categoricals that look like integers
+                if unique_count <= CATEGORICAL_MAX_UNIQUE and (unique_count / total_count) <= CATEGORICAL_CARDINALITY_RATIO:
+                    return LogicalType.CATEGORICAL, series.astype(str)
+
             return LogicalType.INTEGER, numeric_series
-        if pd.api.types.is_integer_dtype(non_null):
-            return LogicalType.INTEGER, numeric_series
+
         return LogicalType.FLOAT, numeric_series
 
     if _infer_categorical(series):

@@ -74,6 +74,16 @@ def _mad_score(observed: dict[int, float]) -> float:
     return min(mad / 0.05, 1.0)
 
 
+def _is_perfectly_sequential(series: pd.Series) -> bool:
+    if series.empty:
+        return False
+    if not (series % 1 == 0).all():
+        return False
+    unique_count = series.nunique()
+    total_count = len(series)
+    return unique_count == total_count and (series.max() - series.min() == total_count - 1)
+
+
 def _analyze_column(column: str, series: pd.Series) -> RuleHit:
     positive = series[series != 0]
     if len(positive) < MIN_SAMPLE_SIZE:
@@ -85,6 +95,24 @@ def _analyze_column(column: str, series: pd.Series) -> RuleHit:
                 f"Column '{column}' has fewer than {MIN_SAMPLE_SIZE} non-zero "
                 "numeric values; Benford chi-square test skipped."
             ),
+            affected_columns=[column],
+        )
+
+    if positive.nunique() < 50:
+        return RuleHit(
+            rule_name=f"benford_{column}",
+            passed=True,
+            score=0.0,
+            reason="Insufficient variance for Benford's Law (unique values < 50). Skipped.",
+            affected_columns=[column],
+        )
+
+    if _is_perfectly_sequential(positive):
+        return RuleHit(
+            rule_name=f"benford_{column}",
+            passed=True,
+            score=0.0,
+            reason="Data appears to be sequential IDs. Skipped.",
             affected_columns=[column],
         )
 

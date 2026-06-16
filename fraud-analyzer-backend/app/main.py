@@ -104,6 +104,14 @@ class EngineResponse(BaseModel):
 class SessionUploadResponse(BaseModel):
     session_id: str
     total_rows: int
+    profile: dict[str, Any]
+
+class SessionAnalyzeRequest(BaseModel):
+    included_columns: list[str]
+
+class SessionAnalyzeResponse(BaseModel):
+    session_id: str
+    message: str
 
 
 class SessionRowResult(BaseModel):
@@ -245,11 +253,11 @@ def verify_api_key(api_key: str = Security(api_key_header)) -> str:
     dependencies=[Depends(verify_api_key)],
 )
 async def upload_dataset_session(
-    file: UploadFile = File(..., description="Raw CSV or Excel dataset to analyze globally."),
+    file: UploadFile = File(..., description="Raw CSV or Excel dataset to profile globally."),
 ) -> dict[str, Any]:
     """
     Accepts a single raw CSV/Excel upload, compiles global statistical profiles,
-    and runs the global Isolation Forest without chunking distortion.
+    and stores the dataframe for pending anomaly detection configuration.
     """
     if file.filename is None or not file.filename.strip():
         raise HTTPException(status_code=400, detail="Uploaded file must have a filename.")
@@ -269,10 +277,59 @@ async def upload_dataset_session(
         if df.empty:
             raise HTTPException(status_code=422, detail="Dataset contains no rows.")
             
-        # Run Isolation Forest globally
-        engine_result = run_anomaly_detection(df, method="isolation_forest")
+        # Profile dataset to infer schema and flag metadata
+        profile_result = profile_dataframe(df, source_filename=filename)
         
         total_rows = len(df)
+        session_id = str(uuid.uuid4())
+        SESSION_CACHE[session_id] = {
+            "total_rows": total_rows,
+            "df": df,
+            "profile": profile_result.to_dict(),
+            "results": None
+        }
+        
+        return {
+            "session_id": session_id,
+            "total_rows": total_rows,
+            "profile": profile_result.to_dict()
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception("Global ingestion failed")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Global ingestion failed: {exc}",
+        ) from exc
+
+
+@app.post(
+    "/session/{session_id}/analyze",
+    response_model=SessionAnalyzeResponse,
+    dependencies=[Depends(verify_api_key)],
+)
+async def analyze_dataset_session(
+    session_id: str,
+    request: SessionAnalyzeRequest,
+) -> dict[str, Any]:
+    """
+    Run anomaly detection and Benford's Law on the verified columns for the uploaded session.
+    """
+    if session_id not in SESSION_CACHE:
+        raise HTTPException(status_code=404, detail="Session expired or not found.")
+        
+    session_data = SESSION_CACHE[session_id]
+    df = session_data.get("df")
+    
+    if df is None:
+        if session_data.get("results") is not None:
+            raise HTTPException(status_code=400, detail="Session has already been analyzed.")
+        raise HTTPException(status_code=500, detail="Session data missing.")
+        
+    try:
+        total_rows = session_data["total_rows"]
         row_results = [
             {
                 "row_index": i, 
@@ -283,8 +340,21 @@ async def upload_dataset_session(
             for i in range(total_rows)
         ]
         
+        # Run engines specifically on the requested columns
+        anomaly_result = run_anomaly_detection(df, method="isolation_forest", columns=request.included_columns)
+        
+        # Run Benford's Law for each requested column, or global
+        benford_result = None
+        for col in request.included_columns:
+            res = run_benfords_law(df, column=col)
+            if benford_result is None:
+                benford_result = res
+            else:
+                benford_result.hits.extend(res.hits)
+        
         # Map hits back to rows
-        for hit in engine_result.hits:
+        all_hits = anomaly_result.hits + (benford_result.hits if benford_result else [])
+        for hit in all_hits:
             if hit.passed or hit.rule_name.endswith("_summary") or hit.rule_name.endswith("_scan"):
                 continue
             for row_idx in hit.affected_rows:
@@ -293,21 +363,19 @@ async def upload_dataset_session(
                     row_results[row_idx]["score"] = max(row_results[row_idx]["score"], hit.score)
                     row_results[row_idx]["hits"].append(hit.to_dict())
         
-        session_id = str(uuid.uuid4())
-        SESSION_CACHE[session_id] = {
-            "total_rows": total_rows,
-            "results": row_results
+        # Save results and free the dataframe to preserve memory
+        SESSION_CACHE[session_id]["results"] = row_results
+        SESSION_CACHE[session_id]["df"] = None
+        
+        return {
+            "session_id": session_id,
+            "message": "Analysis complete."
         }
-        
-        return {"session_id": session_id, "total_rows": total_rows}
-        
-    except HTTPException:
-        raise
     except Exception as exc:
-        logger.exception("Global ingestion failed")
+        logger.exception("Session analysis failed")
         raise HTTPException(
             status_code=500,
-            detail=f"Global ingestion failed: {exc}",
+            detail=f"Session analysis failed: {exc}",
         ) from exc
 
 
