@@ -66,7 +66,7 @@ The service starts at [http://127.0.0.1:8000](http://127.0.0.1:8000). API docs a
 
 Use Python 3.10, 3.11, or 3.12. Python 3.13+ may not have compatible wheels for the scientific packages yet.
 
-For session-based upload endpoints, set an API token before exposing the backend through any tunnel:
+The backend requires `FRAUDY_API_KEY` at startup (unset or empty values fail closed). Set it before starting uvicorn or Docker:
 
 ```bash
 export FRAUDY_API_KEY="replace-with-a-long-random-token"
@@ -85,6 +85,7 @@ cd fraud-analyzer-backend
 python3.11 -m venv .venv
 source .venv/bin/activate   # Windows: .venv\Scripts\activate
 pip install -r app/requirements.txt
+export FRAUDY_API_KEY="replace-with-a-long-random-token"
 uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
 ```
 
@@ -93,10 +94,11 @@ uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
 From the repo root:
 
 ```bash
+export FRAUDY_API_KEY="$(openssl rand -hex 32)"
 docker compose up --build
 ```
 
-Docker is useful for reproducible developer environments, but it is not required for normal analyst usage.
+Docker is useful for reproducible developer environments, but it is not required for normal analyst usage. Compose refuses to start unless `FRAUDY_API_KEY` is set in the environment.
 
 ### API
 
@@ -168,13 +170,13 @@ curl -s -X POST http://localhost:8000/profile \
 
 For larger datasets, use the stateful session flow instead of chunked JSON. The backend accepts one CSV file, fits global anomaly baselines once, stores score results in an in-memory cache, and lets clients page through precomputed scores.
 
-These endpoints require the `X-Fraudy-Token` header. The expected token comes from `FRAUDY_API_KEY`; if unset, the local development default is `super-secret-local-token`.
+These endpoints require the `X-Fraudy-Token` header. Set `FRAUDY_API_KEY` in the backend environment before starting the server, then paste the same value into the Excel task pane (or pass it as `X-Fraudy-Token`). The server refuses to start if the key is unset or empty.
 
 **`POST /session/upload`** — upload a CSV, compile global statistical profiles, and return the inferred schema.
 
 ```bash
 curl -s -X POST http://127.0.0.1:8000/session/upload \
-  -H "X-Fraudy-Token: super-secret-local-token" \
+  -H "X-Fraudy-Token: $FRAUDY_API_KEY" \
   -F "file=@transactions.csv" | python -m json.tool
 ```
 
@@ -197,7 +199,7 @@ Example response:
 
 ```bash
 curl -s -X POST "http://127.0.0.1:8000/session/7f5f5e7d-9e24-4df6-8f83-75a62dcd43e4/analyze" \
-  -H "X-Fraudy-Token: super-secret-local-token" \
+  -H "X-Fraudy-Token: $FRAUDY_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{"included_columns": ["Amount"]}'
 ```
@@ -206,7 +208,7 @@ curl -s -X POST "http://127.0.0.1:8000/session/7f5f5e7d-9e24-4df6-8f83-75a62dcd4
 
 ```bash
 curl -s "http://127.0.0.1:8000/session/7f5f5e7d-9e24-4df6-8f83-75a62dcd43e4/results?skip=0&limit=2000" \
-  -H "X-Fraudy-Token: super-secret-local-token" | python -m json.tool
+  -H "X-Fraudy-Token: $FRAUDY_API_KEY" | python -m json.tool
 ```
 
 Session data is stored in memory (`SESSION_CACHE`) by default, meaning sessions are cleared if the FastAPI server restarts.
@@ -311,7 +313,7 @@ This starts webpack dev server at **https://localhost:3000** with dev HTTPS cert
 3. In Excel: **Insert → Add-ins → My Add-ins → Upload My Add-in**
 4. Choose `fraud-analyzer-frontend/manifest.xml` (or `dist/manifest.xml` after build).
 5. Open the **Fraud Analyzer** task pane from the Home ribbon.
-6. Confirm the API base URL and token in the task pane.
+6. Confirm the API base URL and paste the same `FRAUDY_API_KEY` value into the task pane token field.
 7. Select a range with headers + data, click **Refresh Selection**, then **Analyze & Write Results**.
 
 The task pane uploads the selection as CSV to `/session/upload`, pages scores from `/session/{session_id}/results`, and writes a **Risk Score** and **Reason** column back into Excel with conditional formatting. Use `http://localhost:8000` as the API base URL for local desktop testing.
@@ -327,7 +329,7 @@ Output lands in `dist/`. Update `manifest.xml` URLs if you host the add-in somew
 
 ## Notes
 
-- CORS is open on the backend for local add-in development.
+- CORS defaults to localhost Office add-in origins (`https://localhost:3000` and local variants). Override with `FRAUDY_CORS_ORIGINS` (comma-separated explicit origins). Wildcard origins are rejected.
 - The add-in needs **ReadWriteDocument** permission to read your selection and write risk scores back to the workbook.
 - Icon assets live in `fraud-analyzer-frontend/assets/` — replace with your own branding before publishing.
 

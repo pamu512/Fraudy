@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import io
 import logging
-import os
 import uuid
+from contextlib import asynccontextmanager
 from typing import Any, Callable, Literal
 
 import pandas as pd
@@ -17,12 +17,12 @@ from app.engines.benfords_law import run_benfords_law
 from app.engines.column_significance import run_column_significance
 from app.engines.types import EngineResult
 from app.profiling.profiler import ProfilingError, profile_dataframe, profile_upload
+from app.security import configured_api_key, cors_allow_origins, require_api_key
 
 logger = logging.getLogger(__name__)
 
 EngineRunner = Callable[[pd.DataFrame], EngineResult]
 API_KEY_NAME = "X-Fraudy-Token"
-DEFAULT_API_KEY = "super-secret-local-token"
 api_key_header = APIKeyHeader(name=API_KEY_NAME, auto_error=True)
 
 SESSION_CACHE: dict[str, dict[str, Any]] = {}
@@ -129,6 +129,12 @@ class SessionResultsResponse(BaseModel):
     results: list[SessionRowResult]
 
 
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    require_api_key()
+    yield
+
+
 app = FastAPI(
     title="Fraud Analyzer API",
     description=(
@@ -136,11 +142,12 @@ app = FastAPI(
         "plus raw dataset profiling with schema inference and correlation analysis."
     ),
     version="0.2.0",
+    lifespan=lifespan,
 )
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=cors_allow_origins(),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -236,7 +243,7 @@ def _dataframe_from_request(request: DatasetPayload) -> pd.DataFrame:
 
 
 def verify_api_key(api_key: str = Security(api_key_header)) -> str:
-    expected = os.getenv("FRAUDY_API_KEY", DEFAULT_API_KEY)
+    expected = configured_api_key()
     if not expected:
         raise HTTPException(
             status_code=500,

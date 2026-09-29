@@ -65,7 +65,6 @@ interface SelectionSnapshot {
 }
 
 const DEFAULT_API_BASE_URL = "http://localhost:8000";
-const DEFAULT_API_TOKEN = "super-secret-local-token";
 const RESULTS_PAGE_SIZE = 2000;
 const RISK_SCORE_HEADER = "Risk Score";
 const HIGH_RISK_SCORE_THRESHOLD = 0.75;
@@ -118,7 +117,11 @@ function getApiBaseUrl(): string {
 }
 
 function getApiToken(): string {
-  return apiTokenInput?.value.trim() || DEFAULT_API_TOKEN;
+  const token = apiTokenInput?.value.trim() ?? "";
+  if (!token) {
+    throw new Error("Paste the API token that matches FRAUDY_API_KEY on the backend.");
+  }
+  return token;
 }
 
 function getWritebackMode(): WritebackMode {
